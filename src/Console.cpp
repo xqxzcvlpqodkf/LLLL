@@ -119,6 +119,10 @@ void banner() {
     say("");
 }
 
+std::string millions(long long ticks) {
+    return fmt::format("{:.1f} million", static_cast<double>(ticks) / 1'000'000.0);
+}
+
 std::string seconds(long long ticks) {
     double const value = static_cast<double>(ticks) / 240.0;
     return fmt::format("{:.2f} s", value);
@@ -176,10 +180,19 @@ void report(learnbot::Event const& event) {
             break;
 
         case learnbot::EventKind::BudgetExhausted:
+            say(fmt::format("I have used my whole thinking budget for this level ({}",
+                millions(event.simulated)));
+            say("simulated steps) - keeping the best route I found.", Tone::Warn);
+            break;
+
+        case learnbot::EventKind::RunLengthCap:
             say(fmt::format(
-                "I have used all my thinking time for this level ({} simulated",
-                seconds(event.simulated)));
-            say("seconds of gameplay) - keeping the best route I found.", Tone::Warn);
+                "I reached the limit for one attempt ({} of level) without",
+                seconds(event.tick)));
+            say("finishing or crashing once. If the level is simply very long,",
+                Tone::Warn);
+            say("raise \"Max ticks per pass\" in settings. Keeping what I have.",
+                Tone::Warn);
             break;
     }
 }

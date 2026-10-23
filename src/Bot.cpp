@@ -75,6 +75,8 @@ void LearnBot::onLevelStart(PlayLayer* layer) {
     m_plan.clear();
     m_blockedReason.clear();
     m_learnedOnce = false;
+    m_warmupFrames = 0;
+    m_lastPlayerX = -1e9f;
 
     // GJBaseGameLayer::m_isEditor is true for LevelEditorLayer. In 2.2 both
     // levels and the editor derive from GJBaseGameLayer, and this is the
@@ -119,6 +121,26 @@ bool LearnBot::beforeUpdate(GJBaseGameLayer* layer, GameSim::Advance advance) {
     }
 
     if (m_mode == Mode::Waiting) {
+        // Wait until the level is genuinely simulating before taking the loop
+        // over. The first frames after PlayLayer::init have no player and no
+        // running game state; hijacking them means our manual update() calls
+        // do nothing at all, which is indistinguishable from "the bot did
+        // nothing for two minutes".
+        auto player = m_layer->m_player1;
+        if (!player) {
+            ++m_warmupFrames;
+            return false;  // let the game build itself
+        }
+
+        float const x = player->getPositionX();
+        bool const moving = std::abs(x - m_lastPlayerX) > 0.01f;
+        m_lastPlayerX = x;
+
+        if (!moving && m_warmupFrames < 600) {
+            ++m_warmupFrames;
+            return false;  // player exists but the level has not started moving
+        }
+
         startLearning(m_layer, std::move(advance));
         return true;  // the learning pass consumed this frame
     }
@@ -151,9 +173,12 @@ bool LearnBot::onDeath(PlayerObject* /*player*/, GameObject* /*object*/) {
 
 void LearnBot::onReset() {
     m_replayTick = 0;
-    m_activeSim = nullptr;
-    if (m_mode == Mode::Learning) {
-        m_mode = m_plan.empty() ? Mode::Waiting : Mode::Replay;
+
+    // The learning pass calls resetLevel() itself (before and after the sanity
+    // probe), so this must never change the mode: doing so would stop deaths
+    // being swallowed mid-pass and the pass would die on the first impact.
+    if (m_mode != Mode::Learning) {
+        m_activeSim = nullptr;
     }
 }
 
@@ -177,6 +202,45 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
     m_learnedOnce = true;
     log::info("LearnBot: learning pass starting ({} steps already known)", m_plan.size());
 
+    // ---- sanity probe -------------------------------------------------
+    // Before spending minutes of thinking time, prove that driving the game by
+    // hand actually advances it. Cheap insurance, and if it fails the console
+    // says so in one line instead of quietly learning nothing.
+    layer->resetLevel();
+
+    auto playerBefore = layer->m_player1;
+    float const probeStartX = playerBefore ? playerBefore->getPositionX() : 0.f;
+    for (int i = 0; i < 60; ++i) {
+        layer->handleButton(false, static_cast<int>(PlayerButton::Jump), true);
+        advance(1.f / 240.f);
+    }
+    auto playerAfter = layer->m_player1;
+    float const probeEndX = playerAfter ? playerAfter->getPositionX() : 0.f;
+    double const probePercent = layer->getCurrentPercent();
+    bool const advances = std::abs(probeEndX - probeStartX) > 1.f || probePercent > 0.01;
+
+    layer->resetLevel();
+
+    dbg::say(fmt::format("Test run: moved {:.0f} units in 60 steps ({:.2f}% of the level).",
+        probeEndX - probeStartX, probePercent),
+        advances ? dbg::Tone::Good : dbg::Tone::Bad);
+
+    if (!advances) {
+        m_activeSim = nullptr;
+        dbg::say("The game did not move while I drove it, so I have stopped", dbg::Tone::Bad);
+        dbg::say("instead of spending minutes learning nothing.", dbg::Tone::Bad);
+        dbg::say("This is a bug in the mod, not in your level. Send this line:", dbg::Tone::Warn);
+        dbg::detail(fmt::format(
+            "probe: player1 {}, x {:.2f} -> {:.2f}, percent {:.3f}, isEditor {}",
+            playerBefore ? "present" : "null", probeStartX, probeEndX,
+            probePercent, layer->m_isEditor ? 1 : 0));
+        m_mode = Mode::Stuck;
+        m_blockedReason = "the game did not advance";
+        m_learnedOnce = false;
+        return;
+    }
+
+    // ---- the pass ------------------------------------------------------
     GameSim sim(layer, std::move(advance), 1.f / 240.f);
     m_activeSim = &sim;
 
@@ -192,8 +256,8 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
     params.maxCandidates = std::max(g_bot.maxCandidates, 8);
     params.budgetTicks = budgetForEffort(g_bot.effort);
 
-    dbg::say(fmt::format("Effort: {}/10 (budget {} of simulated gameplay).",
-        std::clamp(g_bot.effort, 1, 10), dbg::seconds(params.budgetTicks)));
+    dbg::say(fmt::format("Effort: {}/10 (budget: {} simulated steps).",
+        std::clamp(g_bot.effort, 1, 10), dbg::millions(params.budgetTicks)));
     dbg::say(fmt::format("Searching up to {} steps ({}) before each crash, {} input{} at a time.",
         params.maxSearchBack, dbg::seconds(params.maxSearchBack),
         params.maxDepth, params.maxDepth == 1 ? "" : "s"));
@@ -333,6 +397,9 @@ std::string LearnBot::statusText() const {
                 percent, m_best, m_plan.size());
         }
         case Mode::Stuck:
+            if (!m_blockedReason.empty()) {
+                return fmt::format("LearnBot: stopped ({})", m_blockedReason);
+            }
             return fmt::format("LearnBot: stuck at {:.0f}%", m_best);
     }
     return "LearnBot";

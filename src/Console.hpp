@@ -39,4 +39,7 @@ void report(learnbot::Event const& event);
 // "1.25 s" from a tick count, for the technical lines.
 std::string seconds(long long ticks);
 
+// "25.0 million" from a tick count, for budgets.
+std::string millions(long long ticks);
+
 } // namespace dbg

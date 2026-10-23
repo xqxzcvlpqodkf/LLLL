@@ -60,7 +60,8 @@ enum class EventKind : std::uint8_t {
     Rewound,
     Stuck,
     Completed,
-    BudgetExhausted,
+    BudgetExhausted,   // ran out of simulated ticks
+    RunLengthCap,      // reached maxTicksPerRun
 };
 
 struct Event {
@@ -128,7 +129,10 @@ public:
             if (outOfBudget() || m_cursor >= m_params.maxTicksPerRun) {
                 m_progress.status = Status::Stuck;
                 m_progress.outOfBudget = outOfBudget();
-                emit(Event { EventKind::BudgetExhausted, m_progress.best, m_cursor });
+                emit(Event {
+                    outOfBudget() ? EventKind::BudgetExhausted : EventKind::RunLengthCap,
+                    m_progress.best, m_cursor
+                });
                 return m_progress;
             }
 

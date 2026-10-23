@@ -66,4 +66,9 @@ private:
     std::string m_blockedReason;
     std::string m_lastHud;
     bool m_learnedOnce = false;
+
+    // Readiness: the frames right after PlayLayer::init are not gameplay, and
+    // taking the loop over during them makes every manual update a no-op.
+    int m_warmupFrames = 0;
+    float m_lastPlayerX = -1e9f;
 };
