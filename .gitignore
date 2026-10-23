@@ -1,0 +1,14 @@
+build/
+build-*/
+.geode/
+*.geode
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+.cache/
+compile_commands.json
+.vscode/
+.idea/
+.DS_Store

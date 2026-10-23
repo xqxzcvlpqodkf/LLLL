@@ -1,0 +1,317 @@
+{
+	"geode": "5.11.2",
+	"gd": {
+		"win": "2.2081",
+		"android": "2.2081",
+		"mac": "2.2081",
+		"ios": "2.2081"
+	},
+	"id": "yourname.learnbot",
+	"name": "LearnBot",
+	"version": "v0.1.0",
+	"developer": "YourName",
+	"description": "An autoplayer that learns a route by simulation: it rewinds to a checkpoint before each death, tries earlier inputs until it survives, and saves the result. Refuses to run on medium, insane or extreme demons.",
+	"dependencies": {
+		"geode.node-ids": ">=v1.23.3"
+	},
+	"settings": {
+		"enabled": {
+			"type": "bool",
+			"name": "Enable LearnBot",
+			"description": "Arm the bot. Restart the level to apply - it decides what to do when a level starts.",
+			"default": false
+		},
+		"gate-title": {
+			"type": "title",
+			"name": "Difficulty gate"
+		},
+		"block-medium-demon": {
+			"type": "bool",
+			"name": "Block medium demons",
+			"default": true
+		},
+		"block-insane-demon": {
+			"type": "bool",
+			"name": "Block insane demons",
+			"default": true
+		},
+		"block-extreme-demon": {
+			"type": "bool",
+			"name": "Block extreme demons",
+			"default": true
+		},
+		"block-easy-demon": {
+			"type": "bool",
+			"name": "Also block easy demons",
+			"default": false
+		},
+		"block-hard-demon": {
+			"type": "bool",
+			"name": "Also block hard demons",
+			"default": false
+		},
+		"block-completed-levels": {
+			"type": "bool",
+			"name": "Skip levels you already cleared",
+			"default": false
+		},
+		"learning-title": {
+			"type": "title",
+			"name": "Learning"
+		},
+		"search-back": {
+			"type": "int",
+			"name": "Search window (ticks)",
+			"description": "How far before a death the bot may try an earlier input. Each tick is 1/240 of a second. Bigger finds more fixes but each death costs more time.",
+			"default": 24,
+			"min": 1,
+			"max": 120,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"lookahead-ticks": {
+			"type": "int",
+			"name": "Lookahead (ticks)",
+			"description": "How long a candidate fix must survive past the death before it is accepted.",
+			"default": 96,
+			"min": 10,
+			"max": 480,
+			"control": {
+				"slider": true,
+				"slider-step": 10
+			}
+		},
+		"rewind-percent": {
+			"type": "float",
+			"name": "Rewind distance (%)",
+			"description": "When no single input fix works, restart this far before the death. Each further failure doubles the distance.",
+			"default": 2.0,
+			"min": 0.5,
+			"max": 25.0,
+			"control": {
+				"slider": true,
+				"slider-step": 0.5
+			}
+		},
+		"checkpoint-every": {
+			"type": "int",
+			"name": "Checkpoint interval (ticks)",
+			"description": "How often a rewind point is stored while playing. Lower means faster repair searches but more state to hold.",
+			"default": 120,
+			"min": 20,
+			"max": 600,
+			"control": {
+				"slider": true,
+				"slider-step": 20
+			}
+		},
+		"max-ticks": {
+			"type": "int",
+			"name": "Max ticks per pass",
+			"description": "Hard stop for one learning pass (240 ticks = one second of level).",
+			"default": 28800,
+			"min": 2400,
+			"max": 72000,
+			"control": {
+				"input": true
+			}
+		},
+		"max-rewinds": {
+			"type": "int",
+			"name": "Max rewinds per death",
+			"description": "How many times the bot backs up and tries a different branch before giving up on a section.",
+			"default": 24,
+			"min": 1,
+			"max": 200,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"debug-title": {
+			"type": "title",
+			"name": "Debug window"
+		},
+		"debug-console": {
+			"type": "bool",
+			"name": "Open a debug window",
+			"description": "On Windows this opens a separate console window next to the game, written in plain English. Everywhere else the same messages go to learnbot.log in the mod's save folder.",
+			"default": true
+		},
+		"debug-detail": {
+			"type": "bool",
+			"name": "Also show technical detail",
+			"description": "Adds the numbers behind each message (ticks, simulated steps). Leave off for plain-English only.",
+			"default": false
+		},
+		"effort": {
+			"type": "int",
+			"name": "How hard it thinks",
+			"description": "1 = a few seconds, 10 = about ten minutes of thinking per level. Higher finds more fixes and takes longer.",
+			"default": 6,
+			"min": 1,
+			"max": 10,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"max-search-back": {
+			"type": "int",
+			"name": "Widest search window (ticks)",
+			"description": "How far before a crash it may look for inputs to change, in 1/240 s steps. Widening this is what lets it fix misses that happened long before the crash, like a missed orb.",
+			"default": 480,
+			"min": 16,
+			"max": 960,
+			"control": {
+				"slider": true,
+				"slider-step": 16
+			}
+		},
+		"max-depth": {
+			"type": "int",
+			"name": "Inputs changed at once",
+			"description": "1 = move a single click. 2 = two clicks together. Higher is smarter but much slower.",
+			"default": 2,
+			"min": 1,
+			"max": 3,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"max-candidates": {
+			"type": "int",
+			"name": "Ideas tested per crash",
+			"default": 128,
+			"min": 8,
+			"max": 512,
+			"control": {
+				"slider": true,
+				"slider-step": 8
+			}
+		},
+		"behaviour-title": {
+			"type": "title",
+			"name": "Behaviour"
+		},
+		"noclip-while-learning": {
+			"type": "bool",
+			"name": "Noclip while learning",
+			"description": "Required: the learning pass must survive a hit so it can record exactly where it would have died. With this off, LearnBot will not start a learning pass.",
+			"default": true
+		},
+		"noclip-fallback": {
+			"type": "bool",
+			"name": "Noclip fallback while playing",
+			"description": "Also skip hits during live playback, so the run always finishes. Clearly cheating; off by default.",
+			"default": false
+		},
+		"safe-mode": {
+			"type": "bool",
+			"name": "Safe mode",
+			"description": "Never save progress from a run the bot took part in.",
+			"default": true
+		},
+		"show-hud": {
+			"type": "bool",
+			"name": "Show status HUD",
+			"default": true
+		},
+		"inject-offset": {
+			"type": "int",
+			"name": "Input offset (ticks)",
+			"description": "Shifts every learned input this many ticks earlier (negative) or later (positive). Use this if the replay is consistently off by a tick.",
+			"default": 0,
+			"min": -8,
+			"max": 8,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"heuristic-title": {
+			"type": "title",
+			"name": "Heuristic"
+		},
+		"jump-clearance-min": {
+			"type": "float",
+			"name": "Jump: nearest distance",
+			"description": "Jump when a hazard is at least this far ahead (game units; one block is 30).",
+			"default": 12.0,
+			"min": 0.0,
+			"max": 90.0,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"jump-clearance-max": {
+			"type": "float",
+			"name": "Jump: furthest distance",
+			"description": "Jump when a hazard is at most this far ahead.",
+			"default": 60.0,
+			"min": 10.0,
+			"max": 200.0,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"flying-lookahead": {
+			"type": "float",
+			"name": "Flying lookahead",
+			"description": "How far ahead ship and wave modes aim for the middle of the free corridor.",
+			"default": 140.0,
+			"min": 40.0,
+			"max": 400.0,
+			"control": {
+				"slider": true,
+				"slider-step": 10
+			}
+		},
+		"orb-reach": {
+			"type": "float",
+			"name": "Orb reach",
+			"description": "How close the bot has to be to press a ring (orb). Game units.",
+			"default": 18.0,
+			"min": 6.0,
+			"max": 40.0,
+			"control": {
+				"slider": true,
+				"slider-step": 1
+			}
+		},
+		"pad-avoid-distance": {
+			"type": "float",
+			"name": "Pad avoidance",
+			"description": "Jump pads fire on their own, so the bot stops pressing jump this close to one.",
+			"default": 90.0,
+			"min": 0.0,
+			"max": 200.0,
+			"control": {
+				"slider": true,
+				"slider-step": 5
+			}
+		},
+		"pit-jump-distance": {
+			"type": "float",
+			"name": "Pit jump distance",
+			"description": "Jump when the ground ends within this distance.",
+			"default": 40.0,
+			"min": 0.0,
+			"max": 120.0,
+			"control": {
+				"slider": true,
+				"slider-step": 5
+			}
+		},
+		"toggle-keybind": {
+			"type": "keybind",
+			"name": "Arm / disarm keybind",
+			"default": "F2"
+		}
+	}
+}
