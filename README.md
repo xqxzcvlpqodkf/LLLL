@@ -138,9 +138,11 @@ PASS (0 failures)
 
 The learner, the difficulty gate and the flying-steering geometry are plain C++ with no Geode dependency, exercised against a 240 Hz toy platformer. That is where the algorithmic risk was, and it is covered.
 
+**Verified since:** the project compiles clean with Geode **v5.11.2 / Win64** on GitHub Actions (`Build (Windows) → Success`, 2026-10-23), so the game-facing code is at least API-correct against the 2.2081 bindings.
+
 **Not verified — the parts to calibrate first:**
 
-1. **The glue compiles?** Written against the v5 binding headers (`markCheckpoint`, `loadFromCheckpoint`, `handleButton`, `m_objects`, `m_currentStep`, …) but never compiled. Send me the compiler errors and I'll fix them.
+1. **Runtime behaviour.** Compiling proves the API calls exist with the right shapes; it does not prove the bot behaves. The three things to watch on first launch are listed below.
 2. **`m_currentStep` as the replay index.** The learned route is indexed by physics tick. If the live replay is consistently one tick off, that is what `inject-offset` is for (−1 or +1).
 3. **Objects vs player coordinates.** `scan::ahead` compares `GameObject::getObjectRect()` against `PlayerObject::getPosition()`, assuming they share a coordinate space (they should — both live under the object layer). If the bot jumps at nonsense times, check this first.
 4. **Determinism.** GD is deterministic at a fixed 240 Hz tick unless the level uses random triggers, timers or chance objects. Those break the assumption that a rewound branch replays identically.
@@ -149,7 +151,7 @@ The learner, the difficulty gate and the flying-steering geometry are plain C++ 
 
 ## Build
 
-New to this? **[BUILDING.md](BUILDING.md)** walks through it click by click, including a GitHub route that needs no compiler at all. The short version:
+New to this? **[SETUP-GITHUB.md](SETUP-GITHUB.md)** is the browser-only route (upload a folder, GitHub builds it), and **[BUILDING.md](BUILDING.md)** walks through it click by click, including a GitHub route that needs no compiler at all. The short version:
 
 ```bash
 # once
