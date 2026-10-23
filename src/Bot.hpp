@@ -52,6 +52,9 @@ public:
     std::string statusText() const;
     std::string blockedReason() const { return m_blockedReason; }
 
+    // The layer this pass is running on (null when idle).
+    PlayLayer* playLayer() const { return m_layer; }
+
     // For the HUD to throttle redraws.
     std::string lastHudText() const { return m_lastHud; }
     void rememberHudText(std::string text) { m_lastHud = std::move(text); }

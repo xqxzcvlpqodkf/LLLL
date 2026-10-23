@@ -1,3 +1,11 @@
+# 0.4.1
+
+- Fixed a build error: `GJGameState` is a struct, not a number, so the
+  diagnostic line now reports `started` / `loading` / `died` instead.
+- Fixed a build error: the tick-pump hook cannot be cast to `PlayLayer`
+  (it derives from `GJBaseGameLayer`), so the post-step drive strategy uses the
+  layer pointer the bot already holds.
+
 # 0.4.0
 
 - **The tick pump now tries four different ways of stepping the game and

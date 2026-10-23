@@ -8,7 +8,7 @@
 	},
 	"id": "yourname.learnbot",
 	"name": "LearnBot",
-	"version": "v0.4.0",
+	"version": "v0.4.1",
 	"developer": "YourName",
 	"description": "An autoplayer that learns a route by simulation: it rewinds to a checkpoint before each death, tries earlier inputs until it survives, and saves the result. Refuses to run on medium, insane or extreme demons.",
 	"dependencies": {

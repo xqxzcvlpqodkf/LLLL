@@ -6,6 +6,8 @@
 #include "Bot.hpp"
 #include "State.hpp"
 
+#include <vector>
+
 using namespace geode::prelude;
 
 namespace {
@@ -156,9 +158,12 @@ class $modify(LearnBotTick, GJBaseGameLayer) {
 
             // C: base update plus the post-step pass, for builds where the
             // level logic lives in postUpdate.
-            drives.push_back({ "base update + postUpdate", [this](float step) {
+            drives.push_back({ "base update + postUpdate", [this, &bot](float step) {
                 GJBaseGameLayer::update(step);
-                if (auto play = static_cast<PlayLayer*>(this)) {
+                // postUpdate lives on PlayLayer, and this hook's own class is
+                // not a PlayLayer, so use the pointer the bot already holds
+                // instead of casting.
+                if (auto play = bot.playLayer()) {
                     play->postUpdate(step);
                 }
             } });

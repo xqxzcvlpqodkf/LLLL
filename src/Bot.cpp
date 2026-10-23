@@ -265,15 +265,11 @@ void LearnBot::startLearning(PlayLayer* layer, std::vector<DriveStrategy> const&
 
         for (float dt : kStepCandidates) {
             auto attempt = probeSteps(layer, drive.advance, dt, 8);
-            if (attempt.stepsSeen > bestSteps || !best.works) {
-                if (attempt.works) {
-                    best = attempt;
-                    bestSteps = attempt.stepsSeen;
-                    bestDt = dt;
-                }
-            }
             if (attempt.works) {
-                break;  // smallest working step for this strategy
+                best = attempt;   // smallest step that works for this strategy
+                bestSteps = attempt.stepsSeen;
+                bestDt = dt;
+                break;
             }
         }
 
@@ -301,12 +297,15 @@ void LearnBot::startLearning(PlayLayer* layer, std::vector<DriveStrategy> const&
         dbg::say("stopped instead of spending minutes learning nothing.", dbg::Tone::Bad);
         dbg::say("This is a bug in the mod, not in your level. Please send these lines:", dbg::Tone::Warn);
         dbg::force(fmt::format(
-            "diag: player1 {}, x {:.2f}, step {}, percent {:.2f}, gameState {}, editor {}, paused {}, ended {}",
+            "diag: player1 {}, x {:.2f}, step {}, percent {:.2f}, "
+            "started {}, loading {:.2f}, died {}, editor {}, paused {}, ended {}",
             layer->m_player1 ? "present" : "null",
             layer->m_player1 ? layer->m_player1->getPositionX() : 0.f,
             static_cast<int>(layer->m_currentStep),
             layer->getCurrentPercent(),
-            static_cast<int>(layer->m_gameState),
+            layer->m_started ? 1 : 0,
+            layer->m_loadingProgress,
+            layer->m_playerDied ? 1 : 0,
             layer->m_isEditor ? 1 : 0,
             layer->m_isPaused ? 1 : 0,
             layer->m_levelEndAnimationStarted ? 1 : 0));
