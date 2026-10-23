@@ -4,6 +4,7 @@
 #include "Heuristic.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <filesystem>
 #include <fstream>
 
@@ -44,6 +45,54 @@ long long budgetForEffort(int effort) {
     };
     int const index = std::clamp(effort, 1, 10);
     return kTable[index];
+}
+
+// Step candidates, smallest first. A game that refuses a step of exactly
+// 1/240 s (float rounding against an internal accumulator, or a minimum-step
+// rule) will accept the next one up, so we find the smallest step that works
+// instead of assuming the textbook value.
+constexpr float kStepCandidates[] = {
+    1.f / 240.f,
+    1.f / 240.f * 1.0001f,
+    1.f / 239.f,
+    1.f / 238.f,
+    1.f / 235.f,
+    1.f / 228.f,
+    1.f / 200.f,
+    1.f / 120.f,
+    1.f / 60.f,
+    1.f / 30.f,
+};
+
+struct Calibration {
+    bool works = false;
+    float dt = 1.f / 240.f;
+    int stepsPerCall = 1;
+    int stepsSeen = 0;
+    float moved = 0.f;
+};
+
+// Drives the game `calls` times and reports what actually happened, using both
+// the game's own step counter and the player's position as evidence.
+Calibration probeSteps(PlayLayer* layer, GameSim::Advance const& advance, float dt, int calls) {
+    Calibration result;
+    result.dt = dt;
+
+    int const before = layer->m_player1 ? static_cast<int>(layer->m_currentStep) : 0;
+    float const x0 = layer->m_player1 ? layer->m_player1->getPositionX() : 0.f;
+
+    for (int i = 0; i < calls; ++i) {
+        advance(dt);
+    }
+
+    int const after = layer->m_player1 ? static_cast<int>(layer->m_currentStep) : 0;
+    float const x1 = layer->m_player1 ? layer->m_player1->getPositionX() : 0.f;
+
+    result.stepsSeen = after - before;
+    result.moved = x1 - x0;
+    result.stepsPerCall = result.stepsSeen > 0 ? std::max(result.stepsSeen / std::max(calls, 1), 1) : 0;
+    result.works = result.stepsSeen > 0 || std::abs(result.moved) > 0.5f;
+    return result;
 }
 
 learnbot::GateSettings gateFromSettings() {
@@ -202,46 +251,89 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
     m_learnedOnce = true;
     log::info("LearnBot: learning pass starting ({} steps already known)", m_plan.size());
 
-    // ---- sanity probe -------------------------------------------------
-    // Before spending minutes of thinking time, prove that driving the game by
-    // hand actually advances it. Cheap insurance, and if it fails the console
-    // says so in one line instead of quietly learning nothing.
-    layer->resetLevel();
-
-    auto playerBefore = layer->m_player1;
-    float const probeStartX = playerBefore ? playerBefore->getPositionX() : 0.f;
-    for (int i = 0; i < 60; ++i) {
-        layer->handleButton(false, static_cast<int>(PlayerButton::Jump), true);
-        advance(1.f / 240.f);
+    // ---- find a step size that actually moves the game -------------------
+    // This is the fix for "0 units moved in 60 steps": instead of assuming the
+    // textbook 1/240 s step is accepted, each candidate is tried and measured.
+    // Nothing here resets the level - a freshly reset level sits in its respawn
+    // state, and stepping it does nothing at all.
+    Calibration calibration;
+    for (float dt : kStepCandidates) {
+        auto attempt = probeSteps(layer, advance, dt, 8);
+        if (attempt.works) {
+            calibration = attempt;
+            break;
+        }
     }
-    auto playerAfter = layer->m_player1;
-    float const probeEndX = playerAfter ? playerAfter->getPositionX() : 0.f;
-    double const probePercent = layer->getCurrentPercent();
-    bool const advances = std::abs(probeEndX - probeStartX) > 1.f || probePercent > 0.01;
 
-    layer->resetLevel();
+    dbg::say(fmt::format("Test run: {} steps, moved {:.0f} units.",
+        calibration.works ? calibration.stepsSeen : 0, calibration.moved),
+        calibration.works ? dbg::Tone::Good : dbg::Tone::Bad);
 
-    dbg::say(fmt::format("Test run: moved {:.0f} units in 60 steps ({:.2f}% of the level).",
-        probeEndX - probeStartX, probePercent),
-        advances ? dbg::Tone::Good : dbg::Tone::Bad);
-
-    if (!advances) {
+    if (!calibration.works) {
         m_activeSim = nullptr;
         dbg::say("The game did not move while I drove it, so I have stopped", dbg::Tone::Bad);
         dbg::say("instead of spending minutes learning nothing.", dbg::Tone::Bad);
-        dbg::say("This is a bug in the mod, not in your level. Send this line:", dbg::Tone::Warn);
-        dbg::detail(fmt::format(
-            "probe: player1 {}, x {:.2f} -> {:.2f}, percent {:.3f}, isEditor {}",
-            playerBefore ? "present" : "null", probeStartX, probeEndX,
-            probePercent, layer->m_isEditor ? 1 : 0));
+        dbg::say("This is a bug in the mod, not in your level. Please send these lines:", dbg::Tone::Warn);
+        dbg::force(fmt::format(
+            "diag: player1 {}, x {:.2f}, step {}, percent {:.2f}, editor {}, paused {}, ended {}",
+            layer->m_player1 ? "present" : "null",
+            layer->m_player1 ? layer->m_player1->getPositionX() : 0.f,
+            static_cast<int>(layer->m_currentStep),
+            layer->getCurrentPercent(),
+            layer->m_isEditor ? 1 : 0,
+            layer->m_isPaused ? 1 : 0,
+            layer->m_levelEndAnimationStarted ? 1 : 0));
         m_mode = Mode::Stuck;
         m_blockedReason = "the game did not advance";
         m_learnedOnce = false;
         return;
     }
 
+    m_stepsPerCall = calibration.stepsPerCall;
+    dbg::say(fmt::format("One call = {} physics step{} (step size {:.6f} s).",
+        m_stepsPerCall, m_stepsPerCall == 1 ? "" : "s", calibration.dt), dbg::Tone::Good);
+
+    // ---- can we rewind? -------------------------------------------------
+    // The whole search depends on restoring a saved game state. If this build
+    // refuses to restore one (checkpoints are normally a practice-mode feature),
+    // the bot still works - it just has to restart from the beginning every time
+    // instead of rewinding two percent. Say so plainly rather than dying.
+    bool checkpointsWork = false;
+    {
+        double const percentBefore = layer->getCurrentPercent();
+        auto checkpoint = layer->markCheckpoint();
+        if (checkpoint) {
+            checkpoint->retain();
+        }
+
+        for (int i = 0; i < 24; ++i) {
+            advance(calibration.dt);
+        }
+        double const percentAfter = layer->getCurrentPercent();
+
+        if (checkpoint) {
+            layer->loadFromCheckpoint(checkpoint);
+            checkpoint->release();
+        }
+        double const percentRestored = layer->getCurrentPercent();
+
+        checkpointsWork = percentAfter > percentBefore + 0.001
+            && std::abs(percentRestored - percentBefore) < 0.5;
+
+        dbg::force(fmt::format(
+            "diag: checkpoint test - {:.3f}% -> {:.3f}% -> restored {:.3f}% ({})",
+            percentBefore, percentAfter, percentRestored,
+            checkpointsWork ? "usable" : "NOT usable"));
+    }
+
+    if (!checkpointsWork) {
+        dbg::say("Rewinding is not available on this setup, so instead of going", dbg::Tone::Warn);
+        dbg::say("back 2% before each crash I will restart the level each time.", dbg::Tone::Warn);
+        dbg::say("Learning still works, it is just slower.", dbg::Tone::Warn);
+    }
+
     // ---- the pass ------------------------------------------------------
-    GameSim sim(layer, std::move(advance), 1.f / 240.f);
+    GameSim sim(layer, std::move(advance), calibration.dt, m_stepsPerCall);
     m_activeSim = &sim;
 
     learnbot::Params params;
@@ -255,6 +347,11 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
     params.maxDepth = std::clamp(g_bot.maxDepth, 1, 3);
     params.maxCandidates = std::max(g_bot.maxCandidates, 8);
     params.budgetTicks = budgetForEffort(g_bot.effort);
+
+    if (!checkpointsWork) {
+        // No rewind points: every branch starts from the level start.
+        params.checkpointEvery = std::numeric_limits<int>::max() / 4;
+    }
 
     dbg::say(fmt::format("Effort: {}/10 (budget: {} simulated steps).",
         std::clamp(g_bot.effort, 1, 10), dbg::millions(params.budgetTicks)));
@@ -290,7 +387,15 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
         progress.simulatedTicks, progress.deepestRepair));
     dbg::say("Now playing that route back with normal physics.", dbg::Tone::Info);
 
-    saveRoute(layer->m_level);
+    // Never persist a pass that proved nothing: 0% with no crashes is the
+    // signature of a drive that did not move, and saving it poisons the level.
+    bool const worthSaving = progress.deaths > 0 || progress.best >= 0.5;
+    if (worthSaving) {
+        saveRoute(layer->m_level);
+    }
+    else {
+        dbg::say("Nothing worth saving from that attempt - keeping the old route.", dbg::Tone::Warn);
+    }
 
     // Hand the game back to GD. The trial left the level wherever its last
     // branch ended, and checkpoint 0 holds no snapshot to load, so the honest
@@ -314,7 +419,10 @@ void LearnBot::pushLiveInput(PlayLayer* layer) {
     // m_currentStep counts physics steps in the current attempt; it is the
     // index the plan was learned against. If a future game version changes
     // that, the "inject offset" setting shifts the whole plan.
-    int const step = static_cast<int>(layer->m_currentStep) + g_bot.injectOffset;
+    // The plan is indexed in the steps the pass actually ran; if the game only
+    // accepts bigger steps, several physics ticks happen per plan entry.
+    int const step = static_cast<int>(layer->m_currentStep) / std::max(m_stepsPerCall, 1)
+        + g_bot.injectOffset;
     int const index = std::max(step, 0) + m_planIndexOffset;
 
     learnbot::Input input;
@@ -351,12 +459,48 @@ void LearnBot::loadRoute(GJGameLevel* level) {
         return;
     }
 
+    // Routes are versioned. Anything without the current header is rejected on
+    // purpose: an older build could write a route that was never validated
+    // (28800 steps of nothing), and silently replaying that is worse than
+    // starting from scratch.
+    std::string header;
+    std::getline(file, header);
+    if (header.rfind("LBROUTE2 ", 0) != 0) {
+        dbg::say("Ignoring an old saved route for this level - it predates the fix.", dbg::Tone::Warn);
+        return;
+    }
+
+    int stepsPerCall = 1;
+    try {
+        stepsPerCall = std::stoi(header.substr(9));
+    }
+    catch (...) {
+        dbg::say("Ignoring a damaged saved route for this level.", dbg::Tone::Warn);
+        return;
+    }
+    m_stepsPerCall = std::clamp(stepsPerCall, 1, 8);
+
     std::string encoded;
     std::getline(file, encoded);
+    if (encoded.empty()) {
+        return;
+    }
 
     m_plan.reserve(encoded.size());
     for (char c : encoded) {
+        if (c != '0' && c != '1') {
+            dbg::say("Ignoring a damaged saved route for this level.", dbg::Tone::Warn);
+            m_plan.clear();
+            return;
+        }
         m_plan.push_back(c == '1' ? learnbot::Input::Hold : learnbot::Input::Release);
+    }
+
+    // A route longer than one attempt could ever be is nonsense.
+    auto const maxSensible = static_cast<std::size_t>(std::max(g_bot.maxTicks, 2400) / m_stepsPerCall + 240);
+    if (m_plan.size() > maxSensible) {
+        dbg::say("Ignoring an oversize saved route for this level.", dbg::Tone::Warn);
+        m_plan.clear();
     }
 }
 
@@ -376,6 +520,7 @@ void LearnBot::saveRoute(GJGameLevel* level) const {
         log::warn("LearnBot: could not save route for level {}", static_cast<int>(level->m_levelID));
         return;
     }
+    file << "LBROUTE2 " << std::max(m_stepsPerCall, 1) << '\n';
     file << encoded << '\n';
 }
 

@@ -20,8 +20,9 @@ class GameSim final : public learnbot::Sim {
 public:
     using Advance = std::function<void(float)>;
 
-    GameSim(PlayLayer* layer, Advance advance, float dt)
-        : m_layer(layer), m_advance(std::move(advance)), m_dt(dt) {
+    GameSim(PlayLayer* layer, Advance advance, float dt, int stepsPerCall = 1)
+        : m_layer(layer), m_advance(std::move(advance)), m_dt(dt),
+          m_stepsPerCall(std::max(stepsPerCall, 1)) {
         m_checkpoints.push_back({ nullptr, 0, 0.0 });  // checkpoint 0 = level start
     }
 
@@ -37,12 +38,22 @@ public:
         if (checkpoint < 0 || checkpoint >= static_cast<int>(m_checkpoints.size())) {
             return;
         }
+        if (!m_layer) {
+            return;
+        }
         auto const& snapshot = m_checkpoints[checkpoint];
         if (snapshot.object && m_layer) {
             m_layer->loadFromCheckpoint(snapshot.object);
         }
         m_tick = snapshot.tick;
         m_died = false;
+
+        // Normalise the button: a restore can land while the game still thinks
+        // the button is held from the branch we came from.
+        if (m_lastInput == learnbot::Input::Hold) {
+            m_layer->handleButton(false, kJumpButton, true);
+        }
+        m_lastInput = learnbot::Input::Release;
     }
 
     int saveCheckpoint() override {
@@ -71,7 +82,15 @@ public:
         }
 
         m_died = false;
-        m_layer->handleButton(input == learnbot::Input::Hold, kJumpButton, true);
+
+        // Only tell the game about the button when it actually changes. Sending
+        // "press" every tick is not the same thing as holding: it re-triggers
+        // orb-style presses and resets jump buffering.
+        if (input != m_lastInput) {
+            m_layer->handleButton(input == learnbot::Input::Hold, kJumpButton, true);
+            m_lastInput = input;
+        }
+
         m_advance(m_dt);
         ++m_tick;
 
@@ -93,6 +112,11 @@ public:
     // Called from the destroyPlayer hook while the bot is driving.
     void markDied() { m_died = true; }
 
+    // Physics steps the game actually ran per advance() call, as measured
+    // during calibration. 1 on a healthy build; more if the game refuses the
+    // smallest step and has to be fed bigger ones.
+    int stepsPerCall() const { return m_stepsPerCall; }
+
     void resetToStart() {
         restore(0);
         m_tick = 0;
@@ -112,5 +136,7 @@ private:
     float m_dt = 1.f / 240.f;
     std::vector<Snapshot> m_checkpoints;
     int m_tick = 0;
+    int m_stepsPerCall = 1;
+    learnbot::Input m_lastInput = learnbot::Input::Release;
     bool m_died = false;
 };

@@ -1,3 +1,26 @@
+# 0.3.0
+
+- **Fixed: the driver assumed a 1/240 s step is accepted.** It is not, on a
+  normal GD build - so 60 manual updates moved the player 0 units. The step size
+  is now *calibrated*: candidates from 1/240 s upward are driven and measured
+  against the game's own step counter and the player's position, and the
+  smallest one that actually moves the game is used. If several ticks happen per
+  call, that ratio is recorded and used for replay indexing.
+- **Fixed: resetting the level before driving it.** A freshly reset level sits in
+  its respawn state and does not simulate, which was the other half of "0 units
+  moved". The pass now starts from the live state.
+- **Fixed: routes could be saved from a pass that proved nothing** (0% and zero
+  crashes), poisoning the level forever. Passes like that are no longer saved.
+- Routes are now versioned (`LBROUTE2 <steps-per-call>`); unknown or damaged
+  files are ignored instead of replayed. Old poisoned routes are dropped
+  automatically.
+- **Fixed: the button was pressed on every tick** instead of only on changes,
+  which is not the same as holding and can re-trigger orbs.
+- Added a checkpoint self-test: if this build refuses to restore a saved game
+  state, the bot says so and falls back to restarting the level for every
+  branch instead of failing silently. Slower, still correct.
+- Diagnostics on failure are now always printed, even with "Debug detail" off.
+
 # 0.2.2
 
 - **Fixed: the learning pass could run before the level was simulating.**

@@ -60,6 +60,7 @@ private:
 
     std::vector<learnbot::Input> m_plan;
     int m_replayTick = 0;
+    int m_stepsPerCall = 1;   // measured during calibration, saved with the route
     double m_best = 0.0;
     int m_planIndexOffset = 0;
 

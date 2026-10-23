@@ -27,6 +27,10 @@ void say(std::string const& text, Tone tone = Tone::Info);
 // Technical extra, only shown when "Debug detail" is enabled.
 void detail(std::string const& text);
 
+// Technical extra that is ALWAYS shown. Used for the lines a player has to send
+// to the developer, where hiding them would defeat the point.
+void force(std::string const& text);
+
 // A heading, to break a long session into readable chunks.
 void section(std::string const& title);
 

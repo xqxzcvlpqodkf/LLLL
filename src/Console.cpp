@@ -96,6 +96,10 @@ void detail(std::string const& text) {
     writeLine("      " + text, Tone::Info, true);
 }
 
+void force(std::string const& text) {
+    writeLine("      " + text, Tone::Warn, false);
+}
+
 void section(std::string const& title) {
     writeLine("", Tone::Info, false);
     writeLine("=== " + title + " ===", Tone::Info, false);
