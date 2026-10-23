@@ -39,6 +39,7 @@ struct BotSettings {
     // Debugging
     bool debugConsole = true;    // separate console window / log file
     bool debugDetail = false;    // also print the technical lines
+    bool diagnoseOnly = false;   // test the game link and stop, learn nothing
 
     // Heuristic tuning
     float jumpClearanceMin = 12.f;

@@ -8,7 +8,17 @@
 #include "core/Learner.hpp"
 
 #include <string>
+#include <utility>
 #include <vector>
+
+// One way of making the game advance by one physics step. Several exist because
+// which function actually runs the level logic differs between builds, and the
+// bindings cannot tell us: PlayLayer overrides `update` in the real binary even
+// though the header does not declare it.
+struct DriveStrategy {
+    char const* name = "";
+    GameSim::Advance advance;
+};
 
 // Drives one level: checks the gate, learns a route, then plays it back.
 class LearnBot {
@@ -26,7 +36,7 @@ public:
 
     // GJBaseGameLayer::update, before the original runs.
     // Returns true if the bot took over the frame.
-    bool beforeUpdate(GJBaseGameLayer* layer, GameSim::Advance advance);
+    bool beforeUpdate(GJBaseGameLayer* layer, std::vector<DriveStrategy> const& drives);
 
     // GJBaseGameLayer::update, after the original runs (live replay).
     void afterUpdate(GJBaseGameLayer* layer);
@@ -47,7 +57,7 @@ public:
     void rememberHudText(std::string text) { m_lastHud = std::move(text); }
 
 private:
-    void startLearning(PlayLayer* layer, GameSim::Advance advance);
+    void startLearning(PlayLayer* layer, std::vector<DriveStrategy> const& drives);
     void pushLiveInput(PlayLayer* layer);
 
     void loadRoute(GJGameLevel* level);

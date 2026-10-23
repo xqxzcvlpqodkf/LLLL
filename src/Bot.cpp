@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <limits>
 #include <filesystem>
+#include <string>
 #include <fstream>
 
 using namespace geode::prelude;
@@ -164,7 +165,7 @@ void LearnBot::onLevelStart(PlayLayer* layer) {
     log::info("LearnBot: armed ({} steps of saved route)", m_plan.size());
 }
 
-bool LearnBot::beforeUpdate(GJBaseGameLayer* layer, GameSim::Advance advance) {
+bool LearnBot::beforeUpdate(GJBaseGameLayer* layer, std::vector<DriveStrategy> const& drives) {
     if (!m_layer || layer != static_cast<GJBaseGameLayer*>(m_layer)) {
         return false;
     }
@@ -176,21 +177,17 @@ bool LearnBot::beforeUpdate(GJBaseGameLayer* layer, GameSim::Advance advance) {
         // do nothing at all, which is indistinguishable from "the bot did
         // nothing for two minutes".
         auto player = m_layer->m_player1;
-        if (!player) {
-            ++m_warmupFrames;
-            return false;  // let the game build itself
+        if (player) {
+            m_lastPlayerX = player->getPositionX();
+        }
+        // Let the level build its objects and settle for a handful of frames,
+        // then start. Waiting for the player to move on its own is wrong: the
+        // whole point is that it only moves once we drive it.
+        if (!player || ++m_warmupFrames < 5) {
+            return false;
         }
 
-        float const x = player->getPositionX();
-        bool const moving = std::abs(x - m_lastPlayerX) > 0.01f;
-        m_lastPlayerX = x;
-
-        if (!moving && m_warmupFrames < 600) {
-            ++m_warmupFrames;
-            return false;  // player exists but the level has not started moving
-        }
-
-        startLearning(m_layer, std::move(advance));
+        startLearning(m_layer, drives);
         return true;  // the learning pass consumed this frame
     }
     if (m_mode == Mode::Learning) {
@@ -240,7 +237,7 @@ void LearnBot::onLevelExit() {
 
 // -- learning -------------------------------------------------------------
 
-void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
+void LearnBot::startLearning(PlayLayer* layer, std::vector<DriveStrategy> const& drives) {
     if (!g_bot.noclipWhileLearning) {
         log::warn("LearnBot: learning needs 'Noclip while learning' - not starting a pass");
         m_mode = Mode::Stuck;
@@ -251,18 +248,47 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
     m_learnedOnce = true;
     log::info("LearnBot: learning pass starting ({} steps already known)", m_plan.size());
 
-    // ---- find a step size that actually moves the game -------------------
-    // This is the fix for "0 units moved in 60 steps": instead of assuming the
-    // textbook 1/240 s step is accepted, each candidate is tried and measured.
-    // Nothing here resets the level - a freshly reset level sits in its respawn
-    // state, and stepping it does nothing at all.
+    // ---- find a way to actually move the game ---------------------------
+    // Two unknowns are tested together, and every combination is reported:
+    // which function runs the level logic, and whether this build accepts a
+    // step of exactly 1/240 s. Nothing here resets the level: a freshly reset
+    // level sits in its respawn state and does not simulate at all.
     Calibration calibration;
-    for (float dt : kStepCandidates) {
-        auto attempt = probeSteps(layer, advance, dt, 8);
-        if (attempt.works) {
-            calibration = attempt;
-            break;
+    char const* workingStrategy = "none";
+
+    dbg::section("Testing ways to drive the game");
+
+    for (auto const& drive : drives) {
+        float bestDt = 0.f;
+        Calibration best;
+        int bestSteps = 0;
+
+        for (float dt : kStepCandidates) {
+            auto attempt = probeSteps(layer, drive.advance, dt, 8);
+            if (attempt.stepsSeen > bestSteps || !best.works) {
+                if (attempt.works) {
+                    best = attempt;
+                    bestSteps = attempt.stepsSeen;
+                    bestDt = dt;
+                }
+            }
+            if (attempt.works) {
+                break;  // smallest working step for this strategy
+            }
         }
+
+        if (best.works) {
+            dbg::say(fmt::format("  {} -> works ({:.0f} units, {} steps)", drive.name,
+                best.moved, best.stepsSeen), dbg::Tone::Good);
+            if (!calibration.works) {
+                calibration = best;
+                workingStrategy = drive.name;
+            }
+        }
+        else {
+            dbg::say(fmt::format("  {} -> nothing happened", drive.name), dbg::Tone::Warn);
+        }
+        (void)bestDt;
     }
 
     dbg::say(fmt::format("Test run: {} steps, moved {:.0f} units.",
@@ -271,27 +297,38 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
 
     if (!calibration.works) {
         m_activeSim = nullptr;
-        dbg::say("The game did not move while I drove it, so I have stopped", dbg::Tone::Bad);
-        dbg::say("instead of spending minutes learning nothing.", dbg::Tone::Bad);
+        dbg::say("None of the ways I know of to drive the game worked, so I have", dbg::Tone::Bad);
+        dbg::say("stopped instead of spending minutes learning nothing.", dbg::Tone::Bad);
         dbg::say("This is a bug in the mod, not in your level. Please send these lines:", dbg::Tone::Warn);
         dbg::force(fmt::format(
-            "diag: player1 {}, x {:.2f}, step {}, percent {:.2f}, editor {}, paused {}, ended {}",
+            "diag: player1 {}, x {:.2f}, step {}, percent {:.2f}, gameState {}, editor {}, paused {}, ended {}",
             layer->m_player1 ? "present" : "null",
             layer->m_player1 ? layer->m_player1->getPositionX() : 0.f,
             static_cast<int>(layer->m_currentStep),
             layer->getCurrentPercent(),
+            static_cast<int>(layer->m_gameState),
             layer->m_isEditor ? 1 : 0,
             layer->m_isPaused ? 1 : 0,
             layer->m_levelEndAnimationStarted ? 1 : 0));
         m_mode = Mode::Stuck;
-        m_blockedReason = "the game did not advance";
+        m_blockedReason = "could not drive the game";
         m_learnedOnce = false;
         return;
     }
 
+    // Use the winner for the whole pass.
+    GameSim::Advance advance;
+    for (auto const& drive : drives) {
+        if (std::string(drive.name) == workingStrategy) {
+            advance = drive.advance;
+            break;
+        }
+    }
+
     m_stepsPerCall = calibration.stepsPerCall;
-    dbg::say(fmt::format("One call = {} physics step{} (step size {:.6f} s).",
-        m_stepsPerCall, m_stepsPerCall == 1 ? "" : "s", calibration.dt), dbg::Tone::Good);
+    dbg::say(fmt::format("Using \"{}\" - one call = {} physics step{} (step size {:.6f} s).",
+        workingStrategy, m_stepsPerCall, m_stepsPerCall == 1 ? "" : "s", calibration.dt),
+        dbg::Tone::Good);
 
     // ---- can we rewind? -------------------------------------------------
     // The whole search depends on restoring a saved game state. If this build
@@ -330,6 +367,16 @@ void LearnBot::startLearning(PlayLayer* layer, GameSim::Advance advance) {
         dbg::say("Rewinding is not available on this setup, so instead of going", dbg::Tone::Warn);
         dbg::say("back 2% before each crash I will restart the level each time.", dbg::Tone::Warn);
         dbg::say("Learning still works, it is just slower.", dbg::Tone::Warn);
+    }
+
+    if (g_bot.diagnoseOnly) {
+        dbg::section("Diagnose only");
+        dbg::say("Stopping here as asked - nothing is being learned or played.", dbg::Tone::Info);
+        dbg::say(fmt::format("Checkpoint rewind: {}.", checkpointsWork ? "works" : "not available"),
+            checkpointsWork ? dbg::Tone::Good : dbg::Tone::Warn);
+        m_mode = Mode::Stuck;
+        m_blockedReason = "diagnose only";
+        return;
     }
 
     // ---- the pass ------------------------------------------------------

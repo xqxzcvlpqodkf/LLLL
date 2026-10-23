@@ -45,6 +45,7 @@ $on_mod(Loaded) {
     // Debugging
     bind<bool>("debug-console", [](bool v) { g_bot.debugConsole = v; });
     bind<bool>("debug-detail", [](bool v) { g_bot.debugDetail = v; });
+    bind<bool>("diagnose-only", [](bool v) { g_bot.diagnoseOnly = v; });
 
     // Behaviour
     bind<bool>("noclip-while-learning", [](bool v) { g_bot.noclipWhileLearning = v; });

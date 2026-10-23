@@ -120,20 +120,56 @@ class $modify(LearnBotPlayLayer, PlayLayer) {
 // GJBaseGameLayer: the tick pump
 // ---------------------------------------------------------------------------
 class $modify(LearnBotTick, GJBaseGameLayer) {
+    struct Fields {
+        // Guards against re-entering this hook from inside our own drive call.
+        bool driving = false;
+    };
+
     void update(float dt) {
         auto& bot = LearnBot::get();
+
+        // Already inside a driven step: this is the real work, do it.
+        if (m_fields->driving) {
+            GJBaseGameLayer::update(dt);
+            return;
+        }
 
         // PlayLayer and LevelEditorLayer both derive from GJBaseGameLayer;
         // m_isEditor is the reliable way to tell them apart.
         if (!m_isEditor) {
-            GameSim::Advance advance = [this](float step) {
-                // Calls the original, not this hook.
-                GJBaseGameLayer::update(step);
-            };
+            std::vector<DriveStrategy> drives;
 
-            if (bot.beforeUpdate(this, std::move(advance))) {
-                // The learning pass owned this frame: it advanced the game
-                // itself, thousands of ticks at a time.
+            // A: call the base implementation directly.
+            drives.push_back({ "direct base update", [this](float step) {
+                GJBaseGameLayer::update(step);
+            } });
+
+            // B: go through the object's vtable. If this build of GD overrides
+            // update in PlayLayer (which the bindings cannot show us), only this
+            // path reaches the code that actually steps the level. The guard
+            // above turns the resulting re-entry into the real work.
+            drives.push_back({ "virtual update", [this](float step) {
+                m_fields->driving = true;
+                static_cast<GJBaseGameLayer*>(this)->update(step);
+                m_fields->driving = false;
+            } });
+
+            // C: base update plus the post-step pass, for builds where the
+            // level logic lives in postUpdate.
+            drives.push_back({ "base update + postUpdate", [this](float step) {
+                GJBaseGameLayer::update(step);
+                if (auto play = static_cast<PlayLayer*>(this)) {
+                    play->postUpdate(step);
+                }
+            } });
+
+            // D: the classic "double tick" some bots use.
+            drives.push_back({ "double base update", [this](float step) {
+                GJBaseGameLayer::update(step * 0.5f);
+                GJBaseGameLayer::update(step * 0.5f);
+            } });
+
+            if (bot.beforeUpdate(this, drives)) {
                 return;
             }
         }

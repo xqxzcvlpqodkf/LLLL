@@ -1,3 +1,17 @@
+# 0.4.0
+
+- **The tick pump now tries four different ways of stepping the game and
+  reports which one works** instead of assuming one. The bindings cannot show
+  whether `PlayLayer` overrides `update`, and if it does, calling the base
+  implementation walks straight past the code that moves the level - which is
+  exactly what "0 steps, 0 units" looked like.
+- Added a re-entrancy guard so driving the game through its own vtable is safe.
+- `diag:` line now also reports `gameState`, so a level that is not in the
+  playing state is visible immediately.
+- New setting `diagnose-only`: run the drive test, print a report, stop. No
+  learning, no playback - the fastest way to report a problem.
+- Stopped blocking for up to 600 frames waiting for the player to move by itself.
+
 # 0.3.0
 
 - **Fixed: the driver assumed a 1/240 s step is accepted.** It is not, on a
